@@ -2,9 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 
-import 'firebase_options.dart';                       // FlutterFire CLI generates this
-import 'app_router.dart';                             // Your route logic
-import 'theme.dart';                                  // Your theme file
+// Firebase
+import 'firebase_options.dart';
+
+// Theme
+import 'theme.dart';
+
+// Screens for AuthWrapper
+import 'screens/onboarding_screen.dart';
+import 'screens/home_screen.dart';
 
 // Providers
 import 'providers/auth_provider.dart';
@@ -50,19 +56,16 @@ class WoofFitApp extends StatelessWidget {
       child: MaterialApp(
         title: 'WoofFit',
         debugShowCheckedModeBanner: false,
-        theme: buildTheme(),                          // From theme.dart
-  home: const AuthWrapper(),
+        theme: buildTheme(),
+        home: const AuthWrapper(),
       ),
     );
   }
 }
-// <--- IMPORTANT: THIS BRACE ENDS THE APP WIDGET
 
-
-// ------------------------------------------------------
-// PASTE AUTHWRAPPER BELOW THIS LINE
-// ------------------------------------------------------
-
+// ---------------------------------------------------------------------------
+// AUTH WRAPPER: Decides whether to show Onboarding/Login or Home based on auth
+// ---------------------------------------------------------------------------
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -70,10 +73,13 @@ class AuthWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
 
+    // If user is not logged in → show onboarding/login
     if (authProvider.user == null) {
       return const OnboardingScreen();
-    } else {
-      return const HomeScreen();
     }
+
+    // If user is logged in → go to home screen
+    return const HomeScreen();
   }
 }
+
