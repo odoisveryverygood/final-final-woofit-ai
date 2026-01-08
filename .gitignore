@@ -7,6 +7,8 @@
 .buildlog/
 .history
 
+# Local secrets (DO NOT COMMIT)
+lib/secrets.dart
 
 
 # Flutter repo-specific
