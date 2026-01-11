@@ -1,5 +1,8 @@
+
 import 'package:flutter/material.dart';
 import 'agent_test.dart';
+import 'ai_chat_screen.dart';
+
 
 
 void main() {
@@ -32,7 +35,7 @@ class MyApp extends StatelessWidget {
         // tested with just a hot reload.
         colorScheme: .fromSeed(seedColor: Colors.deepPurple),
       ),
-     home: const AgentTestPage(),
+     home: const AiChatScreen(),
     );
   }
 }
