@@ -38,7 +38,7 @@ class CoachMemory {
     if (tooHard > 0) lines.add("Previous plans felt too intense.");
     if (tooEasy > 0) lines.add("Previous plans felt too easy.");
     if (skipped > 0) lines.add("Some planned days were skipped.");
-    if (pain > 0) lines.add("Dog showed pain or stiffness.");
+    if (pain > 0) lines.add("Pet showed pain or stiffness.");
     if (success > 0) lines.add("Some plans worked well.");
 
     if (lastNote.isNotEmpty) {

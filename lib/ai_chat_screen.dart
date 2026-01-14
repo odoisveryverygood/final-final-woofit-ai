@@ -1,12 +1,13 @@
+// lib/ai_chat_screen.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'agents/agent_controller.dart';
 import 'agents/openai_client.dart';
-import 'secrets.dart';
-
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'agents/species.dart';
 import 'pro_access.dart';
+import 'secrets.dart';
 
 class AiChatScreen extends StatefulWidget {
   const AiChatScreen({super.key});
@@ -19,29 +20,29 @@ class _AiChatScreenState extends State<AiChatScreen> {
   final _text = TextEditingController();
   bool _loading = false;
 
-  // Simple chat history: user + assistant messages
   final List<Map<String, String>> _messages = [];
-
   late final AgentController _agent;
 
-  // ===== Premium persistent memory config =====
+  // ===== Pro persistent memory =====
   static const String _kPrefChatMessages = 'pv_pro_chat_messages_v1';
   static const int _kMaxStoredMessages = 50;
 
-  // ===== Premium pet profile (local-only) =====
+  // ===== Pro pet profile =====
   static const String _kPrefPetProfile = 'pv_pro_pet_profile_v1';
 
+  // Allowed plan lengths (Option B)
+  static const List<int> _planDayOptions = [5, 7];
+
   // Default profile (used if nothing saved yet)
-  // Guinea pig-first schema:
-  // species, name, age_months, weight_grams, goal, (optional) diet, housing
   Map<String, dynamic> petProfile = {
     "species": "Guinea pig",
     "name": "",
     "age_months": 8,
     "weight_grams": 900,
     "goal": "general health",
-    "diet": "Unlimited timothy hay + pellets + leafy greens",
-    "housing": "Indoor cage with hides + daily floor time",
+    "diet": "",
+    "housing": "",
+    "plan_days": 5, // ✅ Option B default
   };
 
   @override
@@ -56,7 +57,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   // ===============================
-  // Premium memory helpers
+  // Pro memory helpers
   // ===============================
   Future<void> _loadProMemoryIfEnabled() async {
     if (!ProAccess.isPro) return;
@@ -104,8 +105,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   // ===============================
-  // Premium pet profile helpers
+  // Pro pet profile helpers
   // ===============================
+  int _normalizePlanDays(dynamic v) {
+    final n = (v is int) ? v : int.tryParse(v?.toString() ?? "");
+    if (n == 7) return 7;
+    return 5; // default safe
+  }
+
   Future<void> _loadPetProfileIfEnabled() async {
     if (!ProAccess.isPro) return;
 
@@ -117,8 +124,18 @@ class _AiChatScreenState extends State<AiChatScreen> {
       final decoded = jsonDecode(stored);
       if (decoded is Map) {
         if (!mounted) return;
+
+        final loaded = decoded.cast<String, dynamic>();
+
+        // normalize species to canonical supported values
+        final raw = (loaded["species"] ?? "Guinea pig").toString();
+        loaded["species"] = Species.normalize(raw);
+
+        // normalize plan_days
+        loaded["plan_days"] = _normalizePlanDays(loaded["plan_days"]);
+
         setState(() {
-          petProfile = decoded.cast<String, dynamic>();
+          petProfile = loaded;
         });
       }
     } catch (_) {}
@@ -126,6 +143,10 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
   Future<void> _savePetProfileIfEnabled() async {
     if (!ProAccess.isPro) return;
+
+    // Normalize before saving
+    petProfile["species"] = Species.normalize((petProfile["species"] ?? "").toString());
+    petProfile["plan_days"] = _normalizePlanDays(petProfile["plan_days"]);
 
     final prefs = await SharedPreferences.getInstance();
     try {
@@ -139,7 +160,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   // ===============================
-  // Pet profile UI (simple dialog)
+  // Pet profile UI
   // ===============================
   Future<void> _editPetProfileDialog() async {
     if (!ProAccess.isPro) {
@@ -150,72 +171,101 @@ class _AiChatScreenState extends State<AiChatScreen> {
       return;
     }
 
-    final speciesCtrl =
-        TextEditingController(text: (petProfile["species"] ?? "Guinea pig").toString());
+    String selectedSpecies =
+        Species.normalize((petProfile["species"] ?? "Guinea pig").toString());
+
+    int selectedPlanDays = _normalizePlanDays(petProfile["plan_days"]);
+
     final nameCtrl = TextEditingController(text: (petProfile["name"] ?? "").toString());
-    final ageCtrl =
-        TextEditingController(text: (petProfile["age_months"] ?? "").toString());
+    final ageCtrl = TextEditingController(text: (petProfile["age_months"] ?? "").toString());
     final weightCtrl =
         TextEditingController(text: (petProfile["weight_grams"] ?? "").toString());
     final goalCtrl = TextEditingController(text: (petProfile["goal"] ?? "").toString());
     final dietCtrl = TextEditingController(text: (petProfile["diet"] ?? "").toString());
-    final housingCtrl =
-        TextEditingController(text: (petProfile["housing"] ?? "").toString());
+    final housingCtrl = TextEditingController(text: (petProfile["housing"] ?? "").toString());
 
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) {
-        return AlertDialog(
-          title: const Text("Edit Pet Profile (Pro)"),
-          content: SingleChildScrollView(
-            child: Column(
-              children: [
-                TextField(
-                  controller: speciesCtrl,
-                  decoration: const InputDecoration(labelText: "Species (e.g., Guinea pig)"),
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: const Text("Edit Pet Profile (Pro)"),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: selectedSpecies,
+                      items: Species.supported
+                          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                          .toList(),
+                      onChanged: (v) => setLocal(() => selectedSpecies = v ?? selectedSpecies),
+                      decoration: const InputDecoration(labelText: "Species"),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ✅ NEW: Plan length control (Option B)
+                    DropdownButtonFormField<int>(
+                      value: selectedPlanDays,
+                      items: _planDayOptions
+                          .map((d) => DropdownMenuItem(value: d, child: Text("$d days")))
+                          .toList(),
+                      onChanged: (v) =>
+                          setLocal(() => selectedPlanDays = v ?? selectedPlanDays),
+                      decoration: const InputDecoration(labelText: "Plan length"),
+                    ),
+                    const SizedBox(height: 10),
+
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: "Name (optional)"),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: ageCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Age (months)"),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: weightCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Weight (grams)"),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: goalCtrl,
+                      decoration: const InputDecoration(
+                        labelText:
+                            "Goal (bonding / enrichment / weight / stress / habitat / general health)",
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: dietCtrl,
+                      decoration: const InputDecoration(labelText: "Diet (optional)"),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: housingCtrl,
+                      decoration: const InputDecoration(labelText: "Housing (optional)"),
+                    ),
+                  ],
                 ),
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: "Name (optional)"),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text("Cancel"),
                 ),
-                TextField(
-                  controller: ageCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Age (months)"),
-                ),
-                TextField(
-                  controller: weightCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: "Weight (grams)"),
-                ),
-                TextField(
-                  controller: goalCtrl,
-                  decoration: const InputDecoration(
-                    labelText:
-                        "Goal (bonding / enrichment / weight / stress / habitat / general health)",
-                  ),
-                ),
-                TextField(
-                  controller: dietCtrl,
-                  decoration: const InputDecoration(labelText: "Diet (optional)"),
-                ),
-                TextField(
-                  controller: housingCtrl,
-                  decoration: const InputDecoration(labelText: "Housing (optional)"),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text("Save"),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text("Save"),
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -226,15 +276,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
 
       setState(() {
         petProfile = {
-          "species": speciesCtrl.text.trim().isEmpty ? "Guinea pig" : speciesCtrl.text.trim(),
+          "species": Species.normalize(selectedSpecies),
+          "plan_days": _normalizePlanDays(selectedPlanDays),
           "name": nameCtrl.text.trim(),
-          "age_months": age ?? petProfile["age_months"] ?? 0,
-          "weight_grams": weight ?? petProfile["weight_grams"] ?? 0,
+          "age_months": age ?? (petProfile["age_months"] ?? 0),
+          "weight_grams": weight ?? (petProfile["weight_grams"] ?? 0),
           "goal": goalCtrl.text.trim().isEmpty ? "general health" : goalCtrl.text.trim(),
-          "diet": dietCtrl.text.trim().isEmpty ? (petProfile["diet"] ?? "") : dietCtrl.text.trim(),
-          "housing": housingCtrl.text.trim().isEmpty
-              ? (petProfile["housing"] ?? "")
-              : housingCtrl.text.trim(),
+          "diet": dietCtrl.text.trim(),
+          "housing": housingCtrl.text.trim(),
         };
       });
 
@@ -248,13 +297,15 @@ class _AiChatScreenState extends State<AiChatScreen> {
   }
 
   String _profileSummary() {
-    final species = (petProfile["species"] ?? "Guinea pig").toString();
+    final species = Species.normalize((petProfile["species"] ?? "Guinea pig").toString());
     final name = (petProfile["name"] ?? "").toString().trim();
     final age = (petProfile["age_months"] ?? "?").toString();
     final w = (petProfile["weight_grams"] ?? "?").toString();
     final goal = (petProfile["goal"] ?? "general health").toString();
+    final planDays = _normalizePlanDays(petProfile["plan_days"]);
+
     final n = name.isEmpty ? "" : "$name • ";
-    return "${n}${species}, ${age}mo, ${w}g • Goal: $goal";
+    return "${n}${species}, ${age}mo, ${w}g • Goal: $goal • Plan: ${planDays}d";
   }
 
   // ===============================
@@ -273,11 +324,14 @@ class _AiChatScreenState extends State<AiChatScreen> {
     await _saveProMemoryIfEnabled();
 
     try {
+      // Normalize before passing to agent layer
+      petProfile["species"] = Species.normalize((petProfile["species"] ?? "").toString());
+      petProfile["plan_days"] = _normalizePlanDays(petProfile["plan_days"]);
+
       final resp = await _agent.handleUserMessage(
         msg,
         history: _messages,
-        petProfile: petProfile, // ✅ updated key (matches AgentController)
-        // coachMemory: ... (optional, later)
+        petProfile: petProfile,
       );
 
       setState(() {
@@ -295,9 +349,8 @@ class _AiChatScreenState extends State<AiChatScreen> {
       });
       await _saveProMemoryIfEnabled();
     } finally {
-      setState(() {
-        _loading = false;
-      });
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
@@ -314,7 +367,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("PocketVet AI"),
+        title: const Text("PocketVet"),
         actions: [
           Center(
             child: Padding(
@@ -332,18 +385,23 @@ class _AiChatScreenState extends State<AiChatScreen> {
           ),
           IconButton(
             tooltip: ProAccess.isPro ? 'Pro ON' : 'Pro OFF',
-            icon: Icon(
-              ProAccess.isPro ? Icons.workspace_premium : Icons.lock_outline,
-            ),
+            icon: Icon(ProAccess.isPro ? Icons.workspace_premium : Icons.lock_outline),
             onPressed: () async {
-              setState(() {
-                ProAccess.isPro = !ProAccess.isPro;
-              });
+              setState(() => ProAccess.isPro = !ProAccess.isPro);
 
               if (ProAccess.isPro) {
                 await _loadProMemoryIfEnabled();
                 await _loadPetProfileIfEnabled();
+              } else {
+                setState(() {
+                  _messages.clear();
+                });
               }
+
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(ProAccess.isPro ? "PRO enabled" : "PRO disabled")),
+              );
             },
           ),
           IconButton(
@@ -371,9 +429,7 @@ class _AiChatScreenState extends State<AiChatScreen> {
               await _clearProMemory();
               await _clearPetProfile();
               if (!mounted) return;
-              setState(() {
-                _messages.clear();
-              });
+              setState(() => _messages.clear());
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text("Cleared saved memory + profile.")),
               );
@@ -383,7 +439,6 @@ class _AiChatScreenState extends State<AiChatScreen> {
       ),
       body: Column(
         children: [
-          // Small profile banner
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -448,5 +503,3 @@ class _AiChatScreenState extends State<AiChatScreen> {
     );
   }
 }
-
-

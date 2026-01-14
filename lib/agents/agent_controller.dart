@@ -33,8 +33,16 @@ class AgentController {
     Map<String, dynamic>? petProfile,
     CoachMemory? coachMemory,
   }) async {
-    final agentType = AgentRouter.route(userText);
-    final urgentKeyword = AgentRouter.isUrgent(userText);
+    // -------------------------
+    // Shared / canonical inputs
+    // -------------------------
+    final petSpecies = (petProfile?["species"] ?? "Guinea pig").toString();
+    final petName = (petProfile?["name"] ?? "").toString().trim();
+    final nameForPrompt = petName.isEmpty ? "your pet" : petName;
+
+    // Router now can optionally use species
+    final agentType = AgentRouter.route(userText, species: petSpecies);
+    final isUrgentKeyword = AgentRouter.isUrgent(userText);
 
     // Build shared context once
     final profileBlock = _formatPetProfile(petProfile);
@@ -45,14 +53,15 @@ class AgentController {
     // =========================
     if (agentType == AgentType.trainer) {
       var systemPrompt = AgentPrompts.trainerSystem;
+
+      // Put profile in system prompt if available (your existing pattern)
       if (profileBlock.isNotEmpty) {
         systemPrompt = "$systemPrompt\n\n$profileBlock";
       }
 
-      final coachBlock =
-          (coachMemory != null && coachMemory.hasSignal)
-              ? "COACH MEMORY (use to adapt future plans):\n${coachMemory.summarize()}\n"
-              : "";
+      final coachBlock = (coachMemory != null && coachMemory.hasSignal)
+          ? "COACH MEMORY (use to adapt future plans):\n${coachMemory.summarize()}\n"
+          : "";
 
       final prefix = [
         if (profileBlock.isNotEmpty) profileBlock,
@@ -72,7 +81,7 @@ class AgentController {
 
       return AgentResponse(
         agentLabel: "TRAINER",
-        isUrgent: urgentKeyword,
+        isUrgent: isUrgentKeyword,
         text: raw,
         json: null,
       );
@@ -82,10 +91,11 @@ class AgentController {
     // MEAL (STRICT JSON)
     // =========================
     if (agentType == AgentType.meal) {
-      final petName = (petProfile?["name"] ?? "").toString().trim();
-      final nameForPrompt = petName.isEmpty ? "your guinea pig" : petName;
+      final systemPrompt = MealAgent.systemPrompt(
+        petName: nameForPrompt,
+        species: petSpecies,
+      );
 
-      final systemPrompt = MealAgent.systemPrompt(petName: nameForPrompt);
       final userPrompt = MealAgent.userPrompt(
         userMessage: _wrapWithContext(userText, historyText, profileBlock),
         petProfile: petProfile,
@@ -99,10 +109,12 @@ class AgentController {
       );
 
       final parsed = _safeParseJson(raw);
+
+      // If parsing fails, return raw text (still visible to user)
       if (parsed == null) {
         return AgentResponse(
           agentLabel: "MEAL",
-          isUrgent: urgentKeyword,
+          isUrgent: isUrgentKeyword,
           text: raw,
           json: null,
         );
@@ -113,7 +125,7 @@ class AgentController {
 
       return AgentResponse(
         agentLabel: "MEAL",
-        isUrgent: needsVet || urgentKeyword,
+        isUrgent: needsVet || isUrgentKeyword,
         text: display,
         json: parsed,
       );
@@ -122,10 +134,11 @@ class AgentController {
     // =========================
     // VET (STRICT JSON)
     // =========================
-    final petName = (petProfile?["name"] ?? "").toString().trim();
-    final nameForPrompt = petName.isEmpty ? "your guinea pig" : petName;
+    final systemPrompt = VetAgent.systemPrompt(
+      petName: nameForPrompt,
+      species: petSpecies,
+    );
 
-    final systemPrompt = VetAgent.systemPrompt(petName: nameForPrompt);
     final userPrompt = VetAgent.userPrompt(
       userMessage: _wrapWithContext(userText, historyText, profileBlock),
       petProfile: petProfile,
@@ -139,6 +152,8 @@ class AgentController {
     );
 
     final parsed = _safeParseJson(raw);
+
+    // If parsing fails, return raw text (assume urgent since vet was triggered)
     if (parsed == null) {
       return AgentResponse(
         agentLabel: "VET",
@@ -150,8 +165,11 @@ class AgentController {
 
     final triage = (parsed["triage_level"] ?? "VET_SOON").toString().toUpperCase();
     final jsonUrgent = parsed["is_urgent"] == true;
-    final isUrgent =
-        jsonUrgent || triage == "EMERGENCY" || triage == "VET_SOON" || urgentKeyword;
+
+    final isUrgent = jsonUrgent ||
+        triage == "EMERGENCY" ||
+        triage == "VET_SOON" ||
+        isUrgentKeyword;
 
     final display = _renderVetJson(parsed);
 
@@ -166,6 +184,7 @@ class AgentController {
   // -------------------------
   // Helpers
   // -------------------------
+
   String _wrapWithContext(String userText, String historyText, String profileBlock) {
     final pieces = <String>[];
     if (profileBlock.isNotEmpty) pieces.add(profileBlock.trim());
@@ -208,7 +227,7 @@ Housing: $housing
       var text = (m["text"] ?? "").trim();
       if (text.isEmpty) continue;
 
-      // Strip header lines like "TRAINER (URGENT)"
+      // Strip header lines like "TRAINER (URGENT)" / "MEAL" / "VET"
       if (role == "Assistant") {
         final parts = text.split("\n");
         if (parts.isNotEmpty) {
@@ -236,6 +255,7 @@ Housing: $housing
           .replaceAll(RegExp(r'```$', multiLine: true), '')
           .trim();
 
+      // Salvage first {...} block if the model adds text
       final firstBrace = cleaned.indexOf('{');
       final lastBrace = cleaned.lastIndexOf('}');
       if (firstBrace >= 0 && lastBrace > firstBrace) {
@@ -269,7 +289,7 @@ Housing: $housing
     return [
       "Meal: ${j["meal_name"] ?? "Unknown"}",
       if (j["needs_vet_triage"] == true)
-        "\n⚠️ This may need vet triage (possible GI stasis risk).",
+        "\n⚠️ This may need vet triage.",
       "\nDiet quality notes:\n${list("diet_quality_notes")}",
       "\nSafe core structure:\n${list("safe_core_structure")}",
       "\nSuggested portions (conservative):",
@@ -277,7 +297,6 @@ Housing: $housing
       "- Pellets: ${portion("pellets")}",
       "- Veggies: ${portion("veggies")}",
       "- Fruit treats: ${portion("fruit_treats")}",
-      "\nVitamin C strategy:\n${list("vitamin_c_strategy")}",
       "\nUnsafe items detected:\n${list("unsafe_items_detected")}",
       "\nSafer alternatives:\n${list("safer_alternatives")}",
       "\nUrgent actions:\n${list("urgent_actions")}",

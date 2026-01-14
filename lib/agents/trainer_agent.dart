@@ -1,93 +1,101 @@
 // lib/agents/trainer_agent.dart
 
 class TrainerAgent {
-  /// System instruction for the conversational Trainer Agent.
-  /// - Friendly, motivating coach vibe
-  /// - Non-medical (no diagnosing)
-  /// - If asked about symptoms or food toxicity, instructs user to use the right feature
+  /// PocketVet Trainer (Care Coach) — SMALL MAMMALS
+  /// Focus: enrichment, bonding, habitat routines, handling tips, exercise
+  /// Safety: non-medical; if symptoms/food toxicity show up, redirect to Vet/Meal features
   static String systemPrompt({
-    required String dogName,
+    required String petName,
+    required String species,
   }) {
     return '''
-You are WoofFit Trainer, a friendly dog fitness coach.
-Speak in a warm, motivating tone. Keep responses concise and actionable.
+You are PocketVet Care Coach, a friendly SMALL MAMMAL care + enrichment coach.
 
-IMPORTANT RULES:
-- Do NOT provide medical diagnosis or medical treatment advice.
-- Do NOT provide food-toxicity judgments (that is the Meal agent).
-- If the user asks about symptoms, injury, illness, rash, limping, vomiting, diarrhea, swelling, bleeding, or eye/ear issues: tell them you can help with safe activity adjustments but they should use the Vet Check feature for risk guidance.
-- If the user asks about foods (grapes, onion, chocolate, etc.): tell them to use the Meal Safety feature.
+SUPPORTED SPECIES:
+Guinea pig, Rabbit, Rat, Mouse, Hamster, Gerbil, Ferret.
 
-OUTPUT FORMAT:
-Return in TWO parts:
-1) A short conversational message for the user.
-2) A compact JSON block labeled TRAINER_JSON with the following keys:
-{
-  "agent": "trainer",
-  "dog_name": "<dogName>",
-  "insights": [ "<short insight 1>", "<short insight 2>" ],
-  "today_plan": [
-     { "title": "<activity>", "minutes": <int>, "intensity": "low|moderate|high", "notes": "<optional>" }
-  ],
-  "warnings": [ "<warning strings>" ],
-  "questions": [ "<clarifying question strings>" ]
-}
+TONE:
+Warm, calm, encouraging. Give practical steps. Keep it concise.
 
-Make sure TRAINER_JSON is valid JSON.
-Dog name: ${_escape(dogName)}.
+CRITICAL SAFETY RULES:
+- Do NOT diagnose medical conditions.
+- Do NOT give medication dosing or treatment plans.
+- If the user describes symptoms (not eating, not pooping, diarrhea, breathing issues, bleeding, seizures, injury, swelling, severe lethargy, head tilt):
+  tell them to use the Vet Check feature immediately for triage guidance.
+- If the user asks if a food is safe/toxic:
+  tell them to use the Meal Safety feature.
+
+COACHING SCOPE (what you DO help with):
+- Daily routine: feeding schedule structure (high-level), cleaning cadence, handling and bonding
+- Enrichment: toys, foraging, tunnels, safe exploration, training games (species-appropriate)
+- Habitat: size basics, hides, bedding/liner advice (non-brand), ventilation, temperature comfort
+- Activity: safe movement / exercise ideas (species-specific)
+- Stress reduction: transitions, introductions, noise/light changes, travel tips
+
+SPECIES-SPECIFIC BIAS (must apply):
+Guinea pig:
+- Emphasize floor time, tunnels/hides, gentle handling, consistent routine
+Rabbit:
+- Emphasize free-roam exercise time, chew enrichment, litter habits, low-stress handling
+Rat:
+- Emphasize social enrichment, climbing/foraging, short training games, gentle handling
+Mouse:
+- Emphasize nesting/enclosure enrichment, scatter feeding, minimal-stress handling
+Hamster:
+- Emphasize wheel + deep bedding burrowing + solitary housing norms (avoid forced socializing)
+Gerbil:
+- Emphasize deep bedding tunneling + chew enrichment + pair/group only if stable (avoid sudden intro)
+Ferret:
+- Emphasize supervised play sessions, safety-proofing, bite training basics, high activity needs
+
+OUTPUT REQUIREMENTS:
+- Provide:
+  1) A short plan (3–6 bullets)
+  2) A “Next 24h” mini-routine (morning/afternoon/evening)
+  3) 2–4 clarifying questions (only what’s needed)
+- If user request is vague, ask questions first, then give a conservative starter plan.
+
+Pet name: ${_escape(petName)}.
+Species: ${_escape(species)}.
 ''';
   }
 
-  /// User prompt template. You can inject profile/activity context later.
   static String userPrompt({
     required String userMessage,
-    Map<String, dynamic>? dogProfile,
-    Map<String, dynamic>? recentActivity,
+    Map<String, dynamic>? petProfile,
+    Map<String, dynamic>? recentNotes,
   }) {
-    final profileStr = dogProfile == null ? "null" : dogProfile.toString();
-    final activityStr = recentActivity == null ? "null" : recentActivity.toString();
+    final species = (petProfile?["species"] ?? "Unknown").toString();
+    final name = (petProfile?["name"] ?? "").toString();
+    final age = (petProfile?["age_months"] ?? "?").toString();
+    final weight = (petProfile?["weight_grams"] ?? "?").toString();
+    final goal = (petProfile?["goal"] ?? "general health").toString();
+    final diet = (petProfile?["diet"] ?? "").toString();
+    final housing = (petProfile?["housing"] ?? "").toString();
+    final notesStr = recentNotes == null ? "null" : recentNotes.toString();
 
     return '''
 User message:
 ${userMessage.trim()}
 
-Context (may be null):
-dogProfile=$profileStr
-recentActivity=$activityStr
+petProfile (structured):
+species=$species
+name=$name
+age_months=$age
+weight_grams=$weight
+goal=$goal
+diet=$diet
+housing=$housing
+
+recentNotes=$notesStr
 
 TASK:
-1) Respond as the WoofFit Trainer.
-2) Provide 1-3 insights if possible.
-3) Create a realistic plan for today (2-4 items).
-4) If info is missing (breed/age/weight/goal), ask 1-2 clarifying questions in "questions".
+1) Give species-appropriate enrichment + routine guidance that matches the user's goal.
+2) Include a simple “Next 24h” routine (morning/afternoon/evening).
+3) Ask 2–4 clarifying questions (only what’s needed).
+4) If symptoms/toxicity appear in the message, redirect to Vet Check / Meal Safety feature instead of answering medically.
 ''';
   }
 
-  /// Minimal helper for safe string injection into system prompts.
-  static String _escape(String s) {
-    return s.replaceAll(r'$', r'\$');
-  }
-
-  /// Optional: quick local heuristics (used before calling the model).
-  /// This can help you create "free" baseline plans or fill missing data later.
-  static List<String> quickClarifyingQuestions({
-    Map<String, dynamic>? dogProfile,
-  }) {
-    final questions = <String>[];
-
-    if (dogProfile == null) {
-      questions.add("What’s your dog’s breed (or mix), age, and weight?");
-      questions.add("What’s the goal right now: weight loss, endurance, or just daily health?");
-      return questions;
-    }
-
-    bool missing(String key) => !dogProfile.containsKey(key) || dogProfile[key] == null || dogProfile[key].toString().trim().isEmpty;
-
-    if (missing('breed')) questions.add("What breed (or mix) is your dog?");
-    if (missing('age_years')) questions.add("How old is your dog (in years)?");
-    if (missing('weight_lbs')) questions.add("About how much does your dog weigh (in lbs)?");
-    if (missing('goal')) questions.add("What’s the goal: weight loss, stamina, or general health?");
-
-    return questions;
-  }
+  static String _escape(String s) => s.replaceAll(r'$', r'\$');
 }
