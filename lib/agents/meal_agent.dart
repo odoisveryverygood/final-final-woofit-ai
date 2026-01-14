@@ -1,4 +1,9 @@
 // lib/agents/meal_agent.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 
 class MealAgent {
   static const List<String> supportedSpecies = [

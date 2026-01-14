@@ -1,3 +1,8 @@
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 // lib/agents/agent_controller.dart
 import 'dart:convert';
 

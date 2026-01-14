@@ -1,4 +1,9 @@
 // lib/agents/agent_router.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 
 enum AgentType { trainer, meal, vet }
 

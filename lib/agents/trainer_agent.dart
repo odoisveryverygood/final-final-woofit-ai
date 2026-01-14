@@ -1,4 +1,9 @@
 // lib/agents/trainer_agent.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 
 class TrainerAgent {
   /// PocketVet Trainer (Care Coach) — SMALL MAMMALS

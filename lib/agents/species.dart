@@ -1,4 +1,9 @@
 // lib/agents/species.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 
 class Species {
   /// Canonical supported list (product decision).

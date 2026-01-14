@@ -1,4 +1,9 @@
 // lib/agents/prompts.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
 
 class AgentPrompts {
   // ============================================================

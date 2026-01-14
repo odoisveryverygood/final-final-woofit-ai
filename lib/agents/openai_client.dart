@@ -1,4 +1,10 @@
 // lib/agents/openai_client.dart
+// AGENT INTERFACE LOCKED
+// Changes require:
+// - Test update
+// - Version bump
+// - Analytics review
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
